@@ -1,0 +1,12 @@
+streamlit
+pandas
+numpy
+pillow
+torch
+torchvision
+transformers
+matplotlib
+scikit-learn
+ftfy
+regex
+tqdm
