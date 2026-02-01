@@ -4,10 +4,11 @@ from transformers import CLIPProcessor, CLIPModel
 import pandas as pd
 import numpy as np
 import os
-import torch.nn.functional as F
 
 class XRaySearchEngine:
     def __init__(self, model_name="openai/clip-vit-base-patch32"):
+        # Version marker for logs
+        print("--- X-Ray Search Engine Version: 2.1.0 (Cloud Fix) ---")
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Loading search engine on {self.device}...")
         self.model = CLIPModel.from_pretrained(model_name).to(self.device)
@@ -19,27 +20,29 @@ class XRaySearchEngine:
         image = Image.open(image_path).convert("RGB")
         inputs = self.processor(images=image, return_tensors="pt").to(self.device)
         with torch.no_grad():
-            image_features = self.model.get_image_features(**inputs)
+            features = self.model.get_image_features(**inputs)
         
-        # Ensure it's a tensor and normalize
-        if not isinstance(image_features, torch.Tensor):
-            image_features = torch.tensor(image_features)
+        # Ultra-robust manual normalization
+        # This avoids F.normalize and .norm() which fail on some Py3.13/Torch versions
+        if not isinstance(features, torch.Tensor):
+            features = torch.tensor(features)
         
-        # Using manual normalization to avoid F.normalize issues in some environments
-        norm = image_features.pow(2).sum(dim=-1, keepdim=True).sqrt()
-        return image_features / norm
+        sq_norm = torch.sum(features * features, dim=-1, keepdim=True)
+        norm = torch.sqrt(torch.maximum(sq_norm, torch.tensor(1e-12).to(self.device)))
+        return features / norm
 
     def get_text_embedding(self, text):
         inputs = self.processor(text=[text], return_tensors="pt", padding=True).to(self.device)
         with torch.no_grad():
-            text_features = self.model.get_text_features(**inputs)
+            features = self.model.get_text_features(**inputs)
             
-        # Ensure it's a tensor and normalize
-        if not isinstance(text_features, torch.Tensor):
-            text_features = torch.tensor(text_features)
+        # Ultra-robust manual normalization
+        if not isinstance(features, torch.Tensor):
+            features = torch.tensor(features)
             
-        norm = text_features.pow(2).sum(dim=-1, keepdim=True).sqrt()
-        return text_features / norm
+        sq_norm = torch.sum(features * features, dim=-1, keepdim=True)
+        norm = torch.sqrt(torch.maximum(sq_norm, torch.tensor(1e-12).to(self.device)))
+        return features / norm
 
     def index_dataset(self, metadata_path, image_dir):
         print("Indexing dataset...")
@@ -53,7 +56,6 @@ class XRaySearchEngine:
                 all_embeddings.append(emb.cpu().numpy())
             else:
                 print(f"Warning: Image {img_path} not found.")
-                # Add a zero embedding to maintain alignment
                 all_embeddings.append(np.zeros((1, 512)))
         
         self.embeddings = np.vstack(all_embeddings)
