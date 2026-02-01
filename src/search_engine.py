@@ -20,13 +20,26 @@ class XRaySearchEngine:
         inputs = self.processor(images=image, return_tensors="pt").to(self.device)
         with torch.no_grad():
             image_features = self.model.get_image_features(**inputs)
-        return F.normalize(image_features, p=2, dim=-1)
+        
+        # Ensure it's a tensor and normalize
+        if not isinstance(image_features, torch.Tensor):
+            image_features = torch.tensor(image_features)
+        
+        # Using manual normalization to avoid F.normalize issues in some environments
+        norm = image_features.pow(2).sum(dim=-1, keepdim=True).sqrt()
+        return image_features / norm
 
     def get_text_embedding(self, text):
         inputs = self.processor(text=[text], return_tensors="pt", padding=True).to(self.device)
         with torch.no_grad():
             text_features = self.model.get_text_features(**inputs)
-        return F.normalize(text_features, p=2, dim=-1)
+            
+        # Ensure it's a tensor and normalize
+        if not isinstance(text_features, torch.Tensor):
+            text_features = torch.tensor(text_features)
+            
+        norm = text_features.pow(2).sum(dim=-1, keepdim=True).sqrt()
+        return text_features / norm
 
     def index_dataset(self, metadata_path, image_dir):
         print("Indexing dataset...")
