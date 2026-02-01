@@ -8,7 +8,7 @@ import os
 class XRaySearchEngine:
     def __init__(self, model_name="openai/clip-vit-base-patch32"):
         # Version marker for logs
-        print("--- X-Ray Search Engine Version: 2.1.0 (Cloud Fix) ---")
+        print("--- X-Ray Search Engine Version: 2.2.0 (Final Stable Fix) ---")
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Loading search engine on {self.device}...")
         self.model = CLIPModel.from_pretrained(model_name).to(self.device)
@@ -22,11 +22,10 @@ class XRaySearchEngine:
         with torch.no_grad():
             features = self.model.get_image_features(**inputs)
         
-        # Ultra-robust manual normalization
-        # This avoids F.normalize and .norm() which fail on some Py3.13/Torch versions
-        if not isinstance(features, torch.Tensor):
-            features = torch.tensor(features)
+        # Safe conversion to tensor (handles both existing tensors and other types)
+        features = torch.as_tensor(features).to(self.device)
         
+        # Manual normalization to avoid environment-specific AttributeError
         sq_norm = torch.sum(features * features, dim=-1, keepdim=True)
         norm = torch.sqrt(torch.maximum(sq_norm, torch.tensor(1e-12).to(self.device)))
         return features / norm
@@ -36,9 +35,8 @@ class XRaySearchEngine:
         with torch.no_grad():
             features = self.model.get_text_features(**inputs)
             
-        # Ultra-robust manual normalization
-        if not isinstance(features, torch.Tensor):
-            features = torch.tensor(features)
+        # Safe conversion to tensor
+        features = torch.as_tensor(features).to(self.device)
             
         sq_norm = torch.sum(features * features, dim=-1, keepdim=True)
         norm = torch.sqrt(torch.maximum(sq_norm, torch.tensor(1e-12).to(self.device)))
