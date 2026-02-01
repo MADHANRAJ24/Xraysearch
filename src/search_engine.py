@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from PIL import Image
 from transformers import CLIPProcessor, CLIPModel
 import pandas as pd
@@ -8,13 +9,26 @@ import os
 class XRaySearchEngine:
     def __init__(self, model_name="openai/clip-vit-base-patch32"):
         # Version marker for logs
-        print("--- X-Ray Search Engine Version: 4.0.0 (Stone Age Math Fix) ---")
+        print("--- X-Ray Search Engine Version: 5.0.0 (Paranoid Tensor Fix) ---")
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Loading search engine on {self.device}...")
         self.model = CLIPModel.from_pretrained(model_name).to(self.device)
         self.processor = CLIPProcessor.from_pretrained(model_name)
         self.embeddings = None
         self.metadata = None
+
+    def _ensure_tensor(self, x):
+        """Ultra-robust way to force any input into a PyTorch tensor on the correct device."""
+        if torch.is_tensor(x):
+            return x.to(self.device)
+        if isinstance(x, np.ndarray):
+            return torch.from_numpy(x).to(self.device)
+        if isinstance(x, (list, tuple)):
+            return torch.tensor(x).to(self.device)
+        # Fallback for weird HF objects
+        if hasattr(x, "to"):
+            return x.to(self.device)
+        return torch.as_tensor(x).to(self.device)
 
     def get_image_embedding(self, image_path):
         image = Image.open(image_path).convert("RGB")
@@ -23,11 +37,12 @@ class XRaySearchEngine:
         with torch.no_grad():
             features = self.model.get_image_features(**inputs)
         
-        # Stone Age Normalization: Using ONLY basic math operators
-        # This is guaranteed to work on ALL PyTorch versions
-        sq_sum = (features * features).sum(dim=-1, keepdim=True)
-        # Using 1e-12 to prevent division by zero
-        norm = (sq_sum + 1e-12).sqrt()
+        # Force to tensor (fixes TypeError if features is numpy)
+        features = self._ensure_tensor(features)
+        
+        # Use torch.sum (safer than .sum() if there are method conflicts)
+        sq_sum = torch.sum(features * features, dim=-1, keepdim=True)
+        norm = torch.sqrt(sq_sum + 1e-12)
         return features / norm
 
     def get_text_embedding(self, text):
@@ -36,9 +51,11 @@ class XRaySearchEngine:
         with torch.no_grad():
             features = self.model.get_text_features(**inputs)
             
-        # Stone Age Normalization
-        sq_sum = (features * features).sum(dim=-1, keepdim=True)
-        norm = (sq_sum + 1e-12).sqrt()
+        # Force to tensor
+        features = self._ensure_tensor(features)
+            
+        sq_sum = torch.sum(features * features, dim=-1, keepdim=True)
+        norm = torch.sqrt(sq_sum + 1e-12)
         return features / norm
 
     def index_dataset(self, metadata_path, image_dir):
@@ -53,6 +70,7 @@ class XRaySearchEngine:
                 all_embeddings.append(emb.cpu().numpy())
             else:
                 print(f"Warning: Image {img_path} not found.")
+                # Ensure we add a numpy array of match shape
                 all_embeddings.append(np.zeros((1, 512)))
         
         self.embeddings = np.vstack(all_embeddings)
