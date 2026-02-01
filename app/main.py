@@ -1,4 +1,4 @@
-# Ai4See X-Ray Search Engine - v3.0.0 Modern Logic Fix
+# Ai4See X-Ray Search Engine - v4.0.0 Stone Age Math Fix
 import streamlit as st
 import pandas as pd
 import os
