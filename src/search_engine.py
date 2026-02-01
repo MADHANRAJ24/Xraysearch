@@ -8,7 +8,7 @@ import os
 class XRaySearchEngine:
     def __init__(self, model_name="openai/clip-vit-base-patch32"):
         # Version marker for logs
-        print("--- X-Ray Search Engine Version: 2.2.0 (Final Stable Fix) ---")
+        print("--- X-Ray Search Engine Version: 3.0.0 (Modern Logic Fix) ---")
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Loading search engine on {self.device}...")
         self.model = CLIPModel.from_pretrained(model_name).to(self.device)
@@ -19,28 +19,34 @@ class XRaySearchEngine:
     def get_image_embedding(self, image_path):
         image = Image.open(image_path).convert("RGB")
         inputs = self.processor(images=image, return_tensors="pt").to(self.device)
+        
         with torch.no_grad():
+            # features is already a torch.Tensor
             features = self.model.get_image_features(**inputs)
         
-        # Safe conversion to tensor (handles both existing tensors and other types)
-        features = torch.as_tensor(features).to(self.device)
-        
-        # Manual normalization to avoid environment-specific AttributeError
-        sq_norm = torch.sum(features * features, dim=-1, keepdim=True)
-        norm = torch.sqrt(torch.maximum(sq_norm, torch.tensor(1e-12).to(self.device)))
-        return features / norm
+        # Modern normalization using linalg if available
+        if hasattr(torch.linalg, "norm"):
+            norm = torch.linalg.norm(features, ord=2, dim=-1, keepdim=True)
+        else:
+            # Fallback for older torch versions
+            norm = features.pow(2).sum(dim=-1, keepdim=True).sqrt()
+            
+        return features / norm.clamp(min=1e-12)
 
     def get_text_embedding(self, text):
         inputs = self.processor(text=[text], return_tensors="pt", padding=True).to(self.device)
+        
         with torch.no_grad():
+            # features is already a torch.Tensor
             features = self.model.get_text_features(**inputs)
             
-        # Safe conversion to tensor
-        features = torch.as_tensor(features).to(self.device)
+        # Modern normalization
+        if hasattr(torch.linalg, "norm"):
+            norm = torch.linalg.norm(features, ord=2, dim=-1, keepdim=True)
+        else:
+            norm = features.pow(2).sum(dim=-1, keepdim=True).sqrt()
             
-        sq_norm = torch.sum(features * features, dim=-1, keepdim=True)
-        norm = torch.sqrt(torch.maximum(sq_norm, torch.tensor(1e-12).to(self.device)))
-        return features / norm
+        return features / norm.clamp(min=1e-12)
 
     def index_dataset(self, metadata_path, image_dir):
         print("Indexing dataset...")
