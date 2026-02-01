@@ -1,4 +1,4 @@
-# Ai4See X-Ray Search Engine - v6.0.0 Clean Slate Fix
+# Ai4See X-Ray Search Engine - v7.0.0 Hyper-Defensive Fix
 import streamlit as st
 import pandas as pd
 import os

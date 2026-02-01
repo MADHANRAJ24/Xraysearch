@@ -8,43 +8,60 @@ import os
 
 class XRaySearchEngine:
     def __init__(self, model_name="openai/clip-vit-base-patch32"):
-        # Version marker for logs - VERY IMPORTANT
-        print("--- X-Ray Search Engine Version: 6.0.0 (Clean Slate Fix) ---")
+        # Version marker for logs - we use v7.0.0 for the ultra-defensive fix
+        print("--- X-Ray Search Engine Version: 7.0.0 (Hyper-Defensive Fix) ---")
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Loading search engine on {self.device}...")
-        self.model = CLIPModel.from_pretrained(model_name).to(self.device)
-        self.processor = CLIPProcessor.from_pretrained(model_name)
+        try:
+            self.model = CLIPModel.from_pretrained(model_name).to(self.device)
+            self.processor = CLIPProcessor.from_pretrained(model_name)
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            self.device = "cpu"
+            self.model = CLIPModel.from_pretrained(model_name).to(self.device)
+            self.processor = CLIPProcessor.from_pretrained(model_name)
+            
         self.embeddings = None
         self.metadata = None
 
-    def _normalize(self, x):
-        """Standard normalization with a safe backup."""
-        try:
-            # Method 1: Standard and fastest
-            return F.normalize(x, p=2, dim=-1)
-        except Exception as e:
-            # Method 2: Manual fallback if Cloud has an issue with F.normalize
-            print(f"Normalization fallback triggered: {e}")
-            sq_sum = torch.sum(x * x, dim=-1, keepdim=True)
-            return x / torch.sqrt(sq_sum + 1e-12)
+    def _safe_normalize(self, features):
+        """Ultra-robust normalization that handles various types and environment quirks."""
+        # Ensure we are working with a torch tensor
+        if not torch.is_tensor(features):
+            print(f"Warning: Features is not a tensor, type is {type(features)}")
+            try:
+                features = torch.tensor(np.array(features)).to(self.device)
+            except:
+                features = torch.as_tensor(features).to(self.device)
+
+        # Ensure features are floats
+        features = features.float()
+
+        # Manual normalization to avoid F.normalize or .norm() issues on Cloud
+        # We use explicit multiplication and sum to avoid any high-level function issues
+        sq_sum = (features * features).sum(dim=-1, keepdim=True)
+        # Add a tiny epsilon and take sqrt to get the norm
+        norm = torch.sqrt(sq_sum + 1e-12)
+        return features / norm
 
     def get_image_embedding(self, image_path):
         image = Image.open(image_path).convert("RGB")
         inputs = self.processor(images=image, return_tensors="pt").to(self.device)
         
         with torch.no_grad():
-            features = self.model.get_image_features(**inputs)
-        
-        # features is guaranteed to be a tensor here due to return_tensors="pt"
-        return self._normalize(features)
+            outputs = self.model.get_image_features(**inputs)
+            
+        # CLIP model can sometimes return objects or tensors depending on version
+        # We ensure it's a tensor before normalizing
+        return self._safe_normalize(outputs)
 
     def get_text_embedding(self, text):
         inputs = self.processor(text=[text], return_tensors="pt", padding=True).to(self.device)
         
         with torch.no_grad():
-            features = self.model.get_text_features(**inputs)
+            outputs = self.model.get_text_features(**inputs)
             
-        return self._normalize(features)
+        return self._safe_normalize(outputs)
 
     def index_dataset(self, metadata_path, image_dir):
         print("Indexing dataset...")
