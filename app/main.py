@@ -1,4 +1,4 @@
-# Ai4See X-Ray Search Engine - v8.0.0 Pure Numpy Math Fix
+# Ai4See X-Ray Search Engine - v9.0.0 Deep Numpy Fix
 import streamlit as st
 import pandas as pd
 import os

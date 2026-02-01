@@ -8,11 +8,10 @@ import os
 
 class XRaySearchEngine:
     def __init__(self, model_name="openai/clip-vit-base-patch32"):
-        # Version marker for logs - we use v8.0.0 for the Pure Numpy fix
-        print("--- X-Ray Search Engine Version: 8.0.0 (Pure Numpy Math Fix) ---")
+        # Version marker for logs - we use v9.0.0 for the Deep Numpy fix
+        print("--- X-Ray Search Engine Version: 9.0.0 (Deep Numpy Fix) ---")
         
-        # Cloud environments often have unstable CUDA drivers for background tasks
-        # We force CPU for extreme stability, especially with only 500 images
+        # We stay on CPU for maximum reliability in cloud environments
         self.device = "cpu"
         print(f"Loading search engine on {self.device}...")
         
@@ -21,7 +20,6 @@ class XRaySearchEngine:
             self.processor = CLIPProcessor.from_pretrained(model_name)
         except Exception as e:
             print(f"Error loading model: {e}")
-            # Final fallback
             self.model = CLIPModel.from_pretrained(model_name)
             self.processor = CLIPProcessor.from_pretrained(model_name)
             
@@ -29,31 +27,37 @@ class XRaySearchEngine:
         self.metadata = None
 
     def _numpy_normalize(self, x):
-        """Pure Numpy normalization. Globally stable across all environments."""
-        # Ensure we have a numpy array
+        """Ultra-stable normalization using basic Numpy arithmetic."""
+        # Step 1: Force to a standard numeric numpy array
         if torch.is_tensor(x):
             x = x.detach().cpu().numpy()
-        else:
-            x = np.array(x)
-            
-        # Clean up any dimension weirdness
+        
+        # We use asarray with dtype to ensure it's not a 'wrapped' object array
+        try:
+            x = np.asarray(x, dtype=np.float32)
+        except Exception as e:
+            print(f"Aggressive conversion triggered: {e}")
+            # If x is an object (like a dict or list), try to extract nested values
+            if hasattr(x, "values"): x = x.values()
+            x = np.array(list(x), dtype=np.float32)
+
+        # Step 2: Ensure 2D shape [1, 512]
         if len(x.shape) == 1:
             x = x.reshape(1, -1)
             
-        # Standard L2 Normalization in Numpy
-        norm = np.linalg.norm(x, axis=-1, keepdims=True)
-        # Prevent division by zero
-        return x / (norm + 1e-12)
+        # Step 3: Manual L2 Normalization using basic math only
+        # This replaces np.linalg.norm for absolute safety
+        sq_sum = np.sum(x * x, axis=-1, keepdims=True)
+        norm = np.sqrt(sq_sum + 1e-12)
+        return x / norm
 
     def get_image_embedding(self, image_path):
         image = Image.open(image_path).convert("RGB")
-        # Ensure return_tensors matches our CPU device
         inputs = self.processor(images=image, return_tensors="pt").to("cpu")
         
         with torch.no_grad():
             outputs = self.model.get_image_features(**inputs)
             
-        # Convert to numpy and normalize
         return self._numpy_normalize(outputs)
 
     def get_text_embedding(self, text):
@@ -82,17 +86,13 @@ class XRaySearchEngine:
         print(f"Successfully indexed {len(self.embeddings)} images.")
 
     def search_by_text(self, query, top_k=5):
-        # text_emb is already a normalized numpy array
         text_emb = self.get_text_embedding(query)
-        # Similarity calculation in Pure Numpy
         similarities = np.dot(self.embeddings, text_emb.T).flatten()
         top_indices = similarities.argsort()[-top_k:][::-1]
         return self.metadata.iloc[top_indices], similarities[top_indices]
 
     def search_by_image(self, image_path, top_k=5):
-        # img_emb is already a normalized numpy array
         img_emb = self.get_image_embedding(image_path)
-        # Similarity calculation in Pure Numpy
         similarities = np.dot(self.embeddings, img_emb.T).flatten()
         top_indices = similarities.argsort()[-top_k:][::-1]
         return self.metadata.iloc[top_indices], similarities[top_indices]
